@@ -1,0 +1,11 @@
+{
+  "name": "facelock",
+  "image": "mcr.microsoft.com/devcontainers/universal:2",
+  "postCreateCommand": "uv venv && uv pip install -r requirements.txt && cd frontend && npm install",
+  "forwardPorts": [5173, 8000],
+  "customizations": {
+    "vscode": {
+      "extensions": ["svelte.svelte-vscode", "ms-python.python"]
+    }
+  }
+}
