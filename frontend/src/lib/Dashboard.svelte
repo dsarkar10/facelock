@@ -25,6 +25,19 @@
   let editingName = $state("");
   let showingAdd = $state(false);
 
+  let domains = $state([]);
+  let newDomain = $state("");
+  let domainMsg = $state("");
+
+  let blockedIps = $state([]);
+  let newIp = $state("");
+  let newIpPort = $state("");
+  let newIpProto = $state("tcp");
+  let ipMsg = $state("");
+
+  let fwStatus = $state(null);
+  let fwMsg = $state("");
+
   let netTimer;
 
   onMount(async () => {
@@ -131,6 +144,83 @@
     await fetch("/api/logout", { method: "POST" });
     onLogout();
   }
+
+  async function loadDomains() {
+    const res = await fetch("/api/block/domains");
+    if (res.ok) {
+      const data = await res.json();
+      domains = data.domains;
+    }
+  }
+
+  async function addDomain() {
+    if (!newDomain.trim()) return;
+    const fd = new FormData();
+    fd.append("domain", newDomain.trim());
+    const res = await fetch("/api/block/domains", { method: "POST", body: fd });
+    domainMsg = "";
+    if (res.ok || res.status === 409) {
+      const data = await res.json();
+      domainMsg = data.message || (res.ok ? "Blocked" : "Already blocked");
+    } else {
+      domainMsg = "Failed to block domain";
+    }
+    newDomain = "";
+    await loadDomains();
+  }
+
+  async function removeDomain(id) {
+    await fetch("/api/block/domains/" + id, { method: "DELETE" });
+    await loadDomains();
+  }
+
+  async function loadBlockedIps() {
+    const res = await fetch("/api/block/ips");
+    if (res.ok) {
+      const data = await res.json();
+      blockedIps = data.ips;
+    }
+  }
+
+  async function addIp() {
+    if (!newIp.trim()) return;
+    const fd = new FormData();
+    fd.append("ip", newIp.trim());
+    if (newIpPort.trim()) fd.append("port", newIpPort.trim());
+    fd.append("protocol", newIpProto);
+    const res = await fetch("/api/block/ips", { method: "POST", body: fd });
+    ipMsg = "";
+    if (res.ok || res.status === 409) {
+      const data = await res.json();
+      ipMsg = data.message || (res.ok ? "Blocked" : "Already blocked");
+    } else {
+      ipMsg = "Failed to block IP";
+    }
+    newIp = "";
+    newIpPort = "";
+    await loadBlockedIps();
+  }
+
+  async function removeIp(id) {
+    await fetch("/api/block/ips/" + id, { method: "DELETE" });
+    await loadBlockedIps();
+  }
+
+  async function loadFirewallStatus() {
+    const res = await fetch("/api/firewall/status");
+    if (res.ok) {
+      fwStatus = await res.json();
+    }
+  }
+
+  function switchTab(tab) {
+    activeTab = tab;
+    if (tab === "blocklist") {
+      loadDomains();
+      loadBlockedIps();
+      loadFirewallStatus();
+    }
+  }
 </script>
 
 <div class="layout">
@@ -141,22 +231,25 @@
     </div>
 
     <nav class="nav">
-      <button class="nav-item" class:active={activeTab === "home"} onclick={() => activeTab = "home"}>
+      <button class="nav-item" class:active={activeTab === "home"} onclick={() => switchTab("home")}>
         Home
       </button>
-      <button class="nav-item" class:active={activeTab === "security"} onclick={() => activeTab = "security"}>
+      <button class="nav-item" class:active={activeTab === "security"} onclick={() => switchTab("security")}>
         Security
         {#if notifications.length > 0}
           <span class="badge">{notifications.length}</span>
         {/if}
       </button>
-      <button class="nav-item" class:active={activeTab === "network"} onclick={() => activeTab = "network"}>
+      <button class="nav-item" class:active={activeTab === "network"} onclick={() => switchTab("network")}>
         Network
       </button>
-      <button class="nav-item" class:active={activeTab === "history"} onclick={() => activeTab = "history"}>
+      <button class="nav-item" class:active={activeTab === "history"} onclick={() => switchTab("history")}>
         History
       </button>
-      <button class="nav-item" class:active={activeTab === "faceid"} onclick={() => activeTab = "faceid"}>
+      <button class="nav-item" class:active={activeTab === "blocklist"} onclick={() => switchTab("blocklist")}>
+        Blocklist
+      </button>
+      <button class="nav-item" class:active={activeTab === "faceid"} onclick={() => switchTab("faceid")}>
         Face ID
       </button>
     </nav>
@@ -204,7 +297,7 @@
       {#if notifications.length > 0}
         <div class="alert-banner">
           <strong>{notifications.length}</strong> unread security alert{notifications.length > 1 ? "s" : ""}
-          <button class="text-btn" onclick={() => activeTab = "security"}>Review</button>
+          <button class="text-btn" onclick={() => switchTab("security")}>Review</button>
         </div>
       {/if}
 
@@ -277,11 +370,14 @@
             <button class="dismiss-btn" onclick={dismiss}>Dismiss All</button>
           </div>
           {#each notifications as n}
-            <div class="log-row">
+            <div class="log-row snap-row">
               <span class="log-icon">&#9888;</span>
               <div class="log-detail">
                 <span class="log-type">Unauthorized login attempt</span>
                 <span class="log-time">{new Date(n.timestamp).toLocaleString()}</span>
+                {#if n.snapshot_path}
+                  <img src="/api/snapshots/{n.id}" alt="Failed login snapshot" class="snap-img" loading="lazy" />
+                {/if}
               </div>
             </div>
           {/each}
@@ -300,7 +396,7 @@
             <h3>Events ({history.length})</h3>
           </div>
           {#each history as h}
-            <div class="log-row">
+            <div class="log-row snap-row">
               <span class="log-icon">
                 {#if h.attempt_type === "REGISTER"}
                   &#128221;
@@ -321,6 +417,9 @@
                   {/if}
                 </span>
                 <span class="log-time">{new Date(h.timestamp).toLocaleString()}</span>
+                {#if h.snapshot_path}
+                  <img src="/api/snapshots/{h.id}" alt="Failed login snapshot" class="snap-img" loading="lazy" />
+                {/if}
               </div>
             </div>
           {/each}
@@ -328,6 +427,97 @@
       {:else}
         <p class="safe">No history yet.</p>
       {/if}
+
+    {:else if activeTab === "blocklist"}
+      <h1>Blocklist</h1>
+      <p class="sub">Firewall Controller &amp; Port/IP Manager</p>
+
+      <section class="section">
+        <h2>Domain Blocking</h2>
+        <p class="hint">Block websites by domain or URL (e.g. google.com, https://instagram.com)</p>
+        <div class="block-form">
+          <input type="text" placeholder="Enter domain or URL" bind:value={newDomain} />
+          <button onclick={addDomain} disabled={!newDomain.trim()}>Block</button>
+        </div>
+        {#if domainMsg}
+          <p class="msg">{domainMsg}</p>
+        {/if}
+        {#if domains.length > 0}
+          <div class="block-list">
+            {#each domains as d}
+              <div class="block-row">
+                <span class="block-domain">{d.domain}</span>
+                <span class="block-date">Blocked {new Date(d.created_at).toLocaleDateString()}</span>
+                <button class="icon-btn small red" onclick={() => removeDomain(d.id)}>Unblock</button>
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <p class="empty">No blocked domains.</p>
+        {/if}
+      </section>
+
+      <section class="section">
+        <h2>IP &amp; Port Blocking</h2>
+        <div class="block-form ip-form">
+          <input type="text" placeholder="IP address (e.g. 192.168.1.100)" bind:value={newIp} />
+          <input type="number" placeholder="Port (optional)" bind:value={newIpPort} class="port-input" />
+          <select bind:value={newIpProto}>
+            <option value="tcp">TCP</option>
+            <option value="udp">UDP</option>
+            <option value="tcp">TCP+UDP</option>
+          </select>
+          <button onclick={addIp} disabled={!newIp.trim()}>Block</button>
+        </div>
+        {#if ipMsg}
+          <p class="msg">{ipMsg}</p>
+        {/if}
+        {#if blockedIps.length > 0}
+          <div class="block-list">
+            {#each blockedIps as r}
+              <div class="block-row">
+                <span class="block-domain">{r.ip}{#if r.port}:{r.port}{/if} <span class="proto-tag">{r.protocol}</span></span>
+                <span class="block-date">Blocked {new Date(r.created_at).toLocaleDateString()}</span>
+                <button class="icon-btn small red" onclick={() => removeIp(r.id)}>Unblock</button>
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <p class="empty">No blocked IPs or ports.</p>
+        {/if}
+      </section>
+
+      <section class="section">
+        <h2>Firewall Status</h2>
+        {#if fwStatus}
+          <div class="session-card">
+            <div class="session-row">
+              <span class="s-label">Operating System</span>
+              <span class="s-value">{fwStatus.os}</span>
+            </div>
+            <div class="session-row">
+              <span class="s-label">Sudo Available</span>
+              <span class="s-value" class:green={fwStatus.sudo_available} class:red={!fwStatus.sudo_available}>
+                {fwStatus.sudo_available ? "Yes" : "No (rules stored in DB only)"}
+              </span>
+            </div>
+            <div class="session-row">
+              <span class="s-label">Domain Blocking</span>
+              <span class="s-value" class:green={fwStatus.domain_blocking}>
+                {fwStatus.domain_blocking ? "/etc/hosts writable" : "Unavailable"}
+              </span>
+            </div>
+            <div class="session-row last">
+              <span class="s-label">IP Blocking</span>
+              <span class="s-value" class:green={fwStatus.ip_blocking_enabled} class:red={!fwStatus.ip_blocking_enabled}>
+                {fwStatus.ip_blocking_enabled ? "Active" : "Not available"}
+              </span>
+            </div>
+          </div>
+        {:else}
+          <p class="empty">Click to load status.</p>
+        {/if}
+      </section>
 
     {:else if activeTab === "faceid"}
       <h1>Face ID Management</h1>
@@ -543,6 +733,12 @@
     margin-bottom: 1.5rem;
   }
 
+  .hint {
+    color: #6b7280;
+    font-size: 0.8rem;
+    margin-bottom: 0.5rem;
+  }
+
   .alert-banner {
     display: flex;
     align-items: center;
@@ -743,6 +939,17 @@
 
   .log-row:last-child {
     border-bottom: none;
+  }
+
+  .snap-row .log-detail {
+    gap: 0.4rem;
+  }
+
+  .snap-img {
+    max-width: 240px;
+    border-radius: 6px;
+    border: 1px solid #e5e7eb;
+    margin-top: 0.25rem;
   }
 
   .log-icon {
@@ -966,5 +1173,108 @@
     border: 1px solid #d1d5db;
     border-radius: 5px;
     font-size: 0.9rem;
+  }
+
+  .block-form {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .block-form input[type="text"],
+  .block-form input[type="number"],
+  .block-form select {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 0.9rem;
+  }
+
+  .block-form input[type="text"] {
+    flex: 1;
+  }
+
+  .block-form .port-input {
+    width: 100px;
+    flex: none;
+  }
+
+  .block-form select {
+    width: 100px;
+    flex: none;
+  }
+
+  .block-form button {
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 6px;
+    background: #dc2626;
+    color: #fff;
+    font-size: 0.9rem;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .block-form button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .block-list {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .block-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.65rem 1.25rem;
+    border-bottom: 1px solid #f3f4f6;
+  }
+
+  .block-row:last-child {
+    border-bottom: none;
+  }
+
+  .block-domain {
+    flex: 1;
+    font-weight: 500;
+    color: #111827;
+    font-size: 0.9rem;
+  }
+
+  .block-date {
+    font-size: 0.75rem;
+    color: #6b7280;
+    white-space: nowrap;
+  }
+
+  .proto-tag {
+    display: inline-block;
+    font-size: 0.65rem;
+    background: #e0e7ff;
+    color: #4338ca;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+    vertical-align: middle;
+    margin-left: 0.25rem;
+  }
+
+  .msg {
+    font-size: 0.8rem;
+    color: #6b7280;
+    margin-bottom: 0.5rem;
+    padding: 0.35rem 0.75rem;
+    background: #f0fdf4;
+    border-radius: 5px;
+    display: inline-block;
+  }
+
+  .ip-form {
+    flex-wrap: wrap;
   }
 </style>
